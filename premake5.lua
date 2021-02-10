@@ -13,8 +13,7 @@ project "udan_utils"
     links { "udan_debug" }
 
     includedirs { 
-        "include/udan/utils",
-        "../udan_debug/include",
-        "../ThirdParties/SpdLog/include"
+        "include",
+        "../udan_debug/include"
     }
     
