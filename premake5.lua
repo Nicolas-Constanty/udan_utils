@@ -14,6 +14,7 @@ project "udan_utils"
 
     includedirs { 
         "include",
-        "../udan_debug/include"
+        "../udan_debug/include",
+        "../SpdLog/include"
     }
     
