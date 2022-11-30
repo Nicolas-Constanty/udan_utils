@@ -11,9 +11,15 @@ namespace udan
 		class ConditionVariable
 		{
 			CONDITION_VARIABLE m_conditionVariable;
+			DWORD m_waitTime;
 
 		public:
-			explicit ConditionVariable()
+			explicit ConditionVariable() : m_waitTime(0)
+			{
+				InitializeConditionVariable(&m_conditionVariable);
+			}
+
+			explicit ConditionVariable(DWORD waitTime) : m_waitTime(waitTime)
 			{
 				InitializeConditionVariable(&m_conditionVariable);
 			}
@@ -25,7 +31,7 @@ namespace udan
 					SleepConditionVariableCS(
 						&m_conditionVariable,
 						lock.Handle(),
-						INFINITE);
+						m_waitTime);
 				}
 			}
 

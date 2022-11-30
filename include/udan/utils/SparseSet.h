@@ -1,6 +1,10 @@
 ﻿#pragma once
 #include <typeindex>
 #include <vector>
+#include <array>
+#include "udan/utils/utils.h"
+#include "udan/utils/ThreadPool.h"
+#include "udan/utils/Task.h"
 
 namespace udan
 {
@@ -30,7 +34,13 @@ namespace udan
 		template<typename Dataset>
 		auto GetDataAtIndex(Dataset& dataset, size_t index)
 		{
-			return dataset.GetAtPosition(index);
+			return dataset.GetDataAtIndex(index);
+		}
+
+		template<typename Entity, typename Dataset, size_t N = 0>
+		auto GetDataAtIndexes(Dataset& dataset, const std::vector<std::vector<Entity>>& indexes,  size_t index)
+		{
+			return GetDataAtIndex(dataset, indexes[index][N]);
 		}
 
 		template<typename Dataset>
@@ -43,6 +53,12 @@ namespace udan
 		bool EntityExist(Entity e, const Dataset& dataset)
 		{
 			return dataset.Exist(e);
+		}
+
+		template<typename Entity, typename Dataset>
+		Entity GetComponentId(Entity e, Dataset& dataset)
+		{
+			return dataset.GetComponentId(e);
 		}
 
 		template<typename Entity, typename Dataset>
@@ -66,15 +82,17 @@ namespace udan
 		template<typename Entity, typename ...Datasets>
 		class DataSetView
 		{
+			using Indices = std::make_index_sequence<sizeof...(Datasets)>;
 			size_t m_start;
 			size_t m_end;
 			std::tuple<Datasets& ...> m_datasets;
+			std::vector<std::array<Entity, sizeof...(Datasets)>> m_entityIndexes;
 
 		public:
-			DataSetView(const std::vector<Entity>& m_entities, Datasets& ...datasets) : m_datasets({ std::forward<Datasets>(datasets) ... })
+			DataSetView(const std::vector<Entity>& m_entities, Datasets& ...datasets) : m_datasets(std::make_tuple(std::ref(datasets)...))
 			{
 
-				std::vector<Entity> matches;
+				//std::vector<Entity> matches;
 				//{
 				//	const udan::utils::Timer timer;
 				//	for (const auto entity : m_entities)
@@ -99,11 +117,12 @@ namespace udan
 				//}
 
 				{
-					const udan::utils::Timer timer;
+					udan::utils::Timer timer;
+
 					std::vector<size_t> sizes = { GetDataSize(std::get<Datasets&>(m_datasets)) ... };
-					size_t result = UINT_MAX;
+					size_t result = sizes[0];
 					int index = 0;
-					for (int i = 0; i < sizes.size(); ++i)
+					for (int i = 1; i < sizes.size(); ++i)
 					{
 						if (sizes[i] < result)
 						{
@@ -111,7 +130,14 @@ namespace udan
 							index = i;
 						}
 					}
+					auto execTime = timer.GetDeltaTime();
+					std::cout << fmt::format("ECS Find lowest: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
+					timer.Reset();
 					auto entities = RuntimeGet<Entity, decltype(m_datasets)>(m_datasets, index);
+					execTime = timer.GetDeltaTime();
+					std::cout << fmt::format("ECS RuntimeGet: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
+					index = 0;
+					timer.Reset();
 					for (const auto entity : entities)
 					{
 						std::vector<bool> exists = { EntityExist(entity, std::get<Datasets&>(m_datasets)) ... };
@@ -120,20 +146,27 @@ namespace udan
 						{
 							if (!ee)
 							{
+								std::cout << "=========================" << std::endl;
+								std::cout << entity << std::endl;
 								match = false;
-								break;
+								goto NextLoop;
 							}
 						}
-						if (match)
 						{
-							matches.push_back(entity);
+							std::array<Entity, sizeof...(Datasets)> componentIndexes = { GetComponentId(entity, std::get<Datasets&>(m_datasets)) ... };
+							m_entityIndexes.push_back(componentIndexes);
+							index++;
 						}
+						//matches.push_back(entity);
+						//std::vector<bool> exists = { SwapEntity(index, entity, std::get<Datasets&>(m_datasets)) ... };
+					NextLoop: continue;
 					}
-					const auto execTime = timer.GetDeltaTime();
-					LOG_DEBUG("Match Time: (fps {}) {}s", 1.0 / execTime, execTime);
+					execTime = timer.GetDeltaTime();
+					std::cout << fmt::format("ECS Match Time: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
+					//LOG_DEBUG("Match Time: (fps {}) {}s", 1.0 / execTime, execTime);
 				}
 
-				{
+				/*{
 					const udan::utils::Timer timer;
 					m_start = 0;
 					m_end = matches.size();
@@ -142,13 +175,111 @@ namespace udan
 						std::vector<bool> exists = { SwapEntity(i, matches[i], std::get<Datasets&>(m_datasets)) ... };
 					}
 					const auto execTime = timer.GetDeltaTime();
+					std::cout << fmt::format("ECS Sort Time: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
 					LOG_DEBUG("Sort Time: (fps {}) {}s", 1.0 / execTime, execTime);
+				}*/
+			}
+
+			DataSetView(const std::vector<Entity>& m_entities, utils::ThreadPool& threadPool, Datasets& ...datasets) : m_datasets(std::make_tuple(std::ref(datasets)...))
+			{
+				{
+					//udan::utils::Timer timer;
+
+					std::vector<size_t> sizes = { GetDataSize(std::get<Datasets&>(m_datasets)) ... };
+					size_t result = sizes[0];
+					int index = 0;
+					for (int i = 1; i < sizes.size(); ++i)
+					{
+						if (sizes[i] < result)
+						{
+							result = sizes[i];
+							index = i;
+						}
+					}
+					//auto execTime = timer.GetDeltaTime();
+					//std::cout << fmt::format("ECS Find lowest: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
+					//timer.Reset();
+					auto entities = RuntimeGet<Entity, decltype(m_datasets)>(m_datasets, index);
+					//execTime = timer.GetDeltaTime();
+					//std::cout << fmt::format("ECS RuntimeGet: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
+					index = 0;
+					//timer.Reset();
+					const size_t thread_count = threadPool.GetThreadCount();
+					auto totalSize = entities.size();
+					m_entityIndexes.reserve(totalSize);
+					const size_t index_per_thread = totalSize / thread_count;
+					std::vector<std::shared_ptr<utils::ATask>> tasks;
+					tasks.reserve(thread_count);
+					std::vector<std::vector<Entity>> results(thread_count);
+					for (size_t ti = 0; ti < thread_count; ++ti)
+					{
+						const size_t start = ti * index_per_thread;
+						size_t end = start + index_per_thread;
+						if (end > totalSize || (ti == thread_count - 1 && end < totalSize))
+							end = totalSize;
+						tasks.push_back(std::make_shared<udan::utils::DependencyTask>(
+							[&results, &entities, this, start, end, ti]() {
+								for (size_t i = start; i < end; i++)
+								{
+									auto entity = entities[i];
+									std::vector<bool> exists = { EntityExist(entity, std::get<Datasets&>(m_datasets)) ... };
+									for (bool ee : exists)
+									{
+										if (!ee)
+										{
+											std::cout << "=========================" << std::endl;
+											std::cout << entity << std::endl;
+											results[ti].push_back(entity);
+											break;
+										}
+									}
+								}
+							}
+						));
+					}
+					for (const auto& task : tasks)
+					{
+						threadPool.Schedule(task);
+					}
+					threadPool.WaitUntilQueueEmpty();
+					//execTime = timer.GetDeltaTime();
+					//std::cout << fmt::format("ECS Match Time: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
+					//timer.Reset();
+					for (size_t ti = 0; ti < thread_count; ++ti)
+					{
+						auto result = results[ti];
+						const size_t start = ti * index_per_thread;
+						size_t end = start + index_per_thread;
+						if (end > totalSize || (ti == thread_count - 1 && end < totalSize))
+							end = totalSize;
+						if (result.size() == 0)
+						{
+							for (size_t i = start; i < end; i++)
+							{
+								std::array<Entity, sizeof...(Datasets)> componentIndexes = { GetComponentId(entities[i], std::get<Datasets&>(m_datasets)) ... };
+								m_entityIndexes.push_back(componentIndexes);
+								index++;
+							}
+						}
+					}
+					//execTime = timer.GetDeltaTime();
+					//std::cout << fmt::format("ECS Indexing Time: (fps {}) {}s", 1.0 / execTime, execTime) << std::endl;
+					//LOG_DEBUG("Match Time: (fps {}) {}s", 1.0 / execTime, execTime);
 				}
 			}
 
-			auto Get(size_t index)
+			auto Get(size_t index) const
 			{
-				return std::tuple_cat(GetDataAtIndex(std::get<Datasets&>(m_datasets), index)...);
+				return GetFromArray(m_entityIndexes[index], Indices{});
+			}
+
+			template<typename std::size_t... Is>
+			auto GetFromArray(const std::array<Entity, sizeof...(Datasets)>& indexes, std::index_sequence<Is...>) const
+			{
+				const auto indexTuple = std::tuple_cat(indexes);
+				return std::tuple_cat(GetDataAtIndex(
+					std::get<Datasets&>(m_datasets),
+					std::get<Is>(indexes))...);
 			}
 
 			size_t GetSize()
@@ -313,6 +444,11 @@ namespace udan
 				return m_denseComponent[this->m_sparse[id]];
 			}
 
+			Entity GetComponentId(Entity id)
+			{
+				return this->m_sparse[id];
+			}
+
 			FORCEINLINE bool Exist(Entity id) const
 			{
 				return this->m_sparse[id] != this->m_noEntity;
@@ -336,7 +472,7 @@ namespace udan
 				return m_denseComponent;
 			}
 
-			std::tuple<ComponentType&> GetAtPosition(size_t index)
+			std::tuple<ComponentType&> GetDataAtIndex(size_t index)
 			{
 				return { m_denseComponent[index] };
 			}

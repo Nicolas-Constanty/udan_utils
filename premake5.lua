@@ -2,7 +2,7 @@
 project "udan_utils"
     kind "StaticLib"
     language "C++"
-    cppdialect "C++17"
+    cppdialect "C++20"
     staticruntime "off"
 
     files {
@@ -15,6 +15,6 @@ project "udan_utils"
     includedirs { 
         "include",
         "../udan_debug/include",
-        "../SpdLog/include"
+        "../ThirdParties/SpdLog/include"
     }
     

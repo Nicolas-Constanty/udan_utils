@@ -15,7 +15,7 @@ namespace udan
 			CRITICAL_SECTION m_critical_sec;
 
 		public:
-			explicit CriticalSectionLock(DWORD dwSpinCount = 4000)
+			explicit CriticalSectionLock(DWORD dwSpinCount = 0)
 			{
 				if (InitializeCriticalSectionAndSpinCount(&m_critical_sec, dwSpinCount) == 0)
 				{

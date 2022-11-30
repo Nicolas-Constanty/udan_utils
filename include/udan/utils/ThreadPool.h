@@ -32,6 +32,7 @@ namespace udan
 #if DEBUG
 			void Interrupt();
 #endif
+			void BulkSchedule(const std::vector<std::shared_ptr<ATask>>& task);
 			void Schedule(const std::shared_ptr<ATask>& task);
 			void ResetTaskCount();
 			size_t GetThreadCount() const;
@@ -44,6 +45,7 @@ namespace udan
 			ConditionVariable m_cv;
 			ConditionVariable m_queueEmpty;
 			CriticalSectionLock m_mtx;
+			CriticalSectionLock m_mtx_remaining;
 			bool m_shouldRun;
 
 			std::priority_queue<std::shared_ptr<ATask>, std::vector<std::shared_ptr<ATask>>, std::greater<>> m_tasks;

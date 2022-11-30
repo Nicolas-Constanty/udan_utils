@@ -34,7 +34,7 @@ namespace udan
 
 		DependencyTask::DependencyTask(
 			std::function<void()> task_function,
-			const std::vector<std::shared_ptr<ATask>>& tasks,
+			const DependencyVector& tasks,
 			TaskPriority priority) :
 			Task(std::move(task_function), priority)
 		{

@@ -11,7 +11,7 @@ namespace udan
 {
 	namespace utils
 	{
-		ThreadPool::ThreadPool(size_t capacity)
+		ThreadPool::ThreadPool(size_t capacity) : m_cv(INFINITE), m_queueEmpty(INFINITE)
 		{
 			m_shouldRun = true;
 			m_threads.reserve(capacity);
@@ -27,8 +27,8 @@ namespace udan
 			{
 				ScopeLock<decltype(m_mtx)> lck(m_mtx);
 				m_shouldRun = false;
-				m_cv.NotifyOne();
 			}
+			m_cv.NotifyAll();
 			for (auto& thread : m_threads)
 			{
 				thread.join();
@@ -43,8 +43,8 @@ namespace udan
 
 		void ThreadPool::WaitUntilQueueEmpty()
 		{
-			ScopeLock<decltype(m_mtx)> lck(m_mtx);
-			m_queueEmpty.Wait(m_mtx, [this]() { return m_remainingTasks.empty(); });
+			ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
+			m_queueEmpty.Wait(m_mtx_remaining, [this]() { return m_remainingTasks.empty(); });
 			LOG_INFO("Exit wait");
 
 		}
@@ -71,6 +71,48 @@ namespace udan
 			}
 		}*/
 
+		void ThreadPool::BulkSchedule(const std::vector<std::shared_ptr<ATask>>& tasks)
+		{
+			ScopeLock<decltype(m_mtx)> lck(m_mtx);
+			for (const auto& task : tasks)
+			{
+				auto dt = std::dynamic_pointer_cast<DependencyTask>(task);
+				if (dt != nullptr && !dt->Dependencies().empty())
+				{
+					for (const auto& dependency : dt->Dependencies())
+					{
+						if (!dependency->Completed())
+						{
+							dependency->onCompleted += [this, dt, dependency, task]()
+							{
+								if (dt->RemoveDependency(dependency))
+									ScheduleCompletedDependency(task);
+							};
+							break;
+						}
+					}
+				}
+#if DEBUG
+				//LOG_DEBUG("Schedule task {}: ", task->GetId());
+				auto debugTask = std::make_shared<DebugTaskDecorator>(task);
+				m_tasks.push(debugTask);
+				{
+					ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
+					m_remainingTasks.insert(debugTask->GetId());
+					LOG_INFO("Remnaining size: {}", m_remainingTasks.size());
+				}
+#else
+				m_tasks.push(task);
+				{
+					ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
+					m_remainingTasks.insert(task->GetId());
+					LOG_INFO("Remnaining size: {}", m_remainingTasks.size());
+				}
+#endif
+			}
+			m_cv.NotifyAll();
+		}
+
 		void ThreadPool::Schedule(const std::shared_ptr<ATask>& task)
 		{
 			ScopeLock<decltype(m_mtx)> lck(m_mtx);
@@ -90,17 +132,7 @@ namespace udan
 					}
 				}
 			}
-#if DEBUG
-			//LOG_DEBUG("Schedule task {}: ", task->GetId());
-			auto debugTask = std::make_shared<DebugTaskDecorator>(task);
-			m_tasks.push(debugTask);
-			m_remainingTasks.insert(debugTask->GetId());
-#else
-			m_tasks.push(task);
-			m_remainingTasks.insert(task->GetId());
-#endif
-			LOG_INFO("Remnaining size: {}", m_remainingTasks.size());
-			m_cv.NotifyOne();
+			ScheduleCompletedDependency(task);
 		}
 
 		void ThreadPool::ResetTaskCount()
@@ -115,17 +147,31 @@ namespace udan
 
 		void ThreadPool::ScheduleCompletedDependency(const std::shared_ptr<ATask>& task)
 		{
-			ScopeLock<decltype(m_mtx)> lck(m_mtx);
 #if DEBUG
 			//LOG_DEBUG("Schedule task {}: ", task->GetId());
 			auto debugTask = std::make_shared<DebugTaskDecorator>(task);
-			m_tasks.push(debugTask);
-			m_remainingTasks.insert(debugTask->GetId());
-#else
-			m_tasks.push(task);
-			m_remainingTasks.insert(task->GetId());
-#endif	
+			{
+				ScopeLock<decltype(m_mtx)> lck(m_mtx);
+				m_tasks.push(debugTask);
+			}
 			m_cv.NotifyOne();
+			{
+				ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
+				m_remainingTasks.insert(debugTask->GetId());
+				LOG_INFO("Remnaining size: {}", m_remainingTasks.size());
+			}
+#else
+			{
+				ScopeLock<decltype(m_mtx)> lck(m_mtx);
+				m_tasks.push(task);
+			}
+			m_cv.NotifyOne();
+			{
+				ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
+				m_remainingTasks.insert(task->GetId());
+				LOG_INFO("Remnaining size: {}", m_remainingTasks.size());
+			}
+#endif	
 		}
 
 		void ThreadPool::Run()
@@ -136,7 +182,7 @@ namespace udan
 				std::shared_ptr<ATask> task;
 				{
 					ScopeLock<decltype(m_mtx)> lck(m_mtx);
-					m_cv.Wait(m_mtx, [this]()
+					m_cv.Wait(m_mtx, [&]()
 						{
 							return !m_tasks.empty() || !m_shouldRun;
 						});
@@ -145,18 +191,20 @@ namespace udan
 					task = m_tasks.top();
 					m_tasks.pop();
 				}
-				m_cv.NotifyOne();
 				task->Exec();
+				bool notify = false;
 				{
-					ScopeLock<decltype(m_mtx)> lck(m_mtx);
+					ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
 					m_remainingTasks.erase(task->GetId());
 					LOG_INFO("Check if empty");
 					if (m_remainingTasks.empty())
 					{
 						LOG_INFO("No remaining tasks {}", GetCurrentThreadId());
-						m_queueEmpty.NotifyOne();
+						notify = true;
 					}
 				}
+				if (notify)
+					m_queueEmpty.NotifyOne();
 			}
 			LOG_INFO("Exit thread {}", GetCurrentThreadId());
 		}
