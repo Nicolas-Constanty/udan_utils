@@ -1,11 +1,10 @@
 ﻿#include "udan/utils/ThreadPool.h"
 
-#include <iostream>
-
 
 #include "udan/utils/ScopeLock.h"
-#include "udan/utils/WindowsApi.h"
 #include "udan/debug/uLogger.h"
+
+#include <iostream>
 
 namespace udan
 {
@@ -119,20 +118,28 @@ namespace udan
 			auto dt = std::dynamic_pointer_cast<DependencyTask>(task);
 			if (dt != nullptr && !dt->Dependencies().empty())
 			{
+				auto ready = true;
 				for (const auto& dependency : dt->Dependencies())
 				{
 					if (!dependency->Completed())
 					{
+						ready = false;
 						dependency->onCompleted += [this, dt, dependency, task]()
 						{
 							if (dt->RemoveDependency(dependency))
-								ScheduleCompletedDependency(task);
+							{
+								Schedule(task);
+							}
 						};
-						break;
 					}
 				}
+				if (ready)
+				{
+					ScheduleCompletedDependency(task);
+				}
 			}
-			ScheduleCompletedDependency(task);
+			else
+				ScheduleCompletedDependency(task);
 		}
 
 		void ThreadPool::ResetTaskCount()
@@ -179,28 +186,30 @@ namespace udan
 			LOG_INFO("Start thread {}", GetCurrentThreadId());
 			while (m_shouldRun)
 			{
-				std::shared_ptr<ATask> task;
-				{
-					ScopeLock<decltype(m_mtx)> lck(m_mtx);
-					m_cv.Wait(m_mtx, [&]()
-						{
-							return !m_tasks.empty() || !m_shouldRun;
-						});
-					if (!m_shouldRun)
-						break;
-					task = m_tasks.top();
-					m_tasks.pop();
-				}
-				task->Exec();
 				bool notify = false;
 				{
-					ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
-					m_remainingTasks.erase(task->GetId());
-					LOG_INFO("Check if empty");
-					if (m_remainingTasks.empty())
+					std::shared_ptr<ATask> task;
 					{
-						LOG_INFO("No remaining tasks {}", GetCurrentThreadId());
-						notify = true;
+						ScopeLock<decltype(m_mtx)> lck(m_mtx);
+						m_cv.Wait(m_mtx, [&]()
+							{
+								return !m_tasks.empty() || !m_shouldRun;
+							});
+						if (!m_shouldRun)
+							break;
+						task = m_tasks.top();
+						m_tasks.pop();
+					}
+					task->Exec();
+					{
+						ScopeLock<decltype(m_mtx_remaining)> lck(m_mtx_remaining);
+						m_remainingTasks.erase(task->GetId());
+						LOG_INFO("Check if empty");
+						if (m_remainingTasks.empty())
+						{
+							LOG_INFO("No remaining tasks {}", GetCurrentThreadId());
+							notify = true;
+						}
 					}
 				}
 				if (notify)

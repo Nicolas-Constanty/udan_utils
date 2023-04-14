@@ -17,13 +17,13 @@ namespace udan
 		class ThreadPool
 		{
 		public:
-			ThreadPool(size_t capacity);
+			__declspec(dllexport) ThreadPool(size_t capacity);
 			/**
 			 * \brief This function finish running, then stop threads and join
 			 */
-			void Stop();
-			void StopWhenQueueEmpty();
-			void WaitUntilQueueEmpty();
+			__declspec(dllexport) void Stop();
+			__declspec(dllexport) void StopWhenQueueEmpty();
+			__declspec(dllexport) void WaitUntilQueueEmpty();
 
 			/**
 			 * \brief This function may lead to UB since thread are directly killed prefer Stop over Interrupt
@@ -32,10 +32,10 @@ namespace udan
 #if DEBUG
 			void Interrupt();
 #endif
-			void BulkSchedule(const std::vector<std::shared_ptr<ATask>>& task);
-			void Schedule(const std::shared_ptr<ATask>& task);
-			void ResetTaskCount();
-			size_t GetThreadCount() const;
+			__declspec(dllexport) void BulkSchedule(const std::vector<std::shared_ptr<ATask>>& task);
+			__declspec(dllexport) void Schedule(const std::shared_ptr<ATask>& task);
+			__declspec(dllexport) void ResetTaskCount();
+			__declspec(dllexport) size_t GetThreadCount() const;
 
 			//void ThreadPool::Print();
 		private:

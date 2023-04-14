@@ -25,9 +25,9 @@ namespace udan
 		public:
 			Event<> onCompleted;
 
-			explicit ATask(TaskPriority priority = TaskPriority::NORMAL, size_t task_id = 0);
-			virtual ~ATask();
-			virtual void Exec() = 0;
+			__declspec(dllexport) explicit ATask(TaskPriority priority = TaskPriority::NORMAL, size_t task_id = 0);
+			__declspec(dllexport) virtual ~ATask();
+			__declspec(dllexport) virtual void Exec() = 0;
 			[[nodiscard]] TaskPriority GetPriority() const
 			{
 				return m_priority;
@@ -71,9 +71,9 @@ namespace udan
 		class Task : public ATask
 		{
 		public:
-			explicit Task(std::function<void()> task_function, TaskPriority priority = TaskPriority::NORMAL);
-			~Task() override;
-			void Exec() override;
+			__declspec(dllexport) explicit Task(std::function<void()> task_function, TaskPriority priority = TaskPriority::NORMAL);
+			__declspec(dllexport) ~Task() override;
+			__declspec(dllexport) void Exec() override;
 
 		private:
 			std::function<void()> m_task;
@@ -86,13 +86,13 @@ namespace udan
 		class DependencyTask final : public Task
 		{
 		public:
-			explicit DependencyTask(
+			__declspec(dllexport) explicit DependencyTask(
 				std::function<void()> task_function,
 				const DependencyVector& tasks = {},
 				TaskPriority priority = TaskPriority::NORMAL);
-			~DependencyTask()  override;
-			bool RemoveDependency(const std::shared_ptr<ATask>& task);
-			[[nodiscard]] const std::list<std::shared_ptr<ATask>>& Dependencies() const;
+			__declspec(dllexport) ~DependencyTask()  override;
+			__declspec(dllexport) bool RemoveDependency(const std::shared_ptr<ATask>& task);
+			[[nodiscard]] __declspec(dllexport)  const std::list<std::shared_ptr<ATask>>& Dependencies() const;
 
 		private:
 			std::list <std::shared_ptr<ATask>> m_dependencies;
@@ -102,9 +102,9 @@ namespace udan
 		class DebugTaskDecorator : public ATask
 		{
 		public:
-			explicit DebugTaskDecorator(const std::shared_ptr<ATask>& task);
-			~DebugTaskDecorator() override;
-			void Exec() override;
+			__declspec(dllexport) explicit DebugTaskDecorator(const std::shared_ptr<ATask>& task);
+			__declspec(dllexport) ~DebugTaskDecorator() override;
+			__declspec(dllexport) void Exec() override;
 
 		private:
 			std::shared_ptr<ATask> m_task;
